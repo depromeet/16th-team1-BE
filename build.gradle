@@ -3,6 +3,8 @@ plugins {
 	id 'org.springframework.boot' version '3.4.2'
 	id 'io.spring.dependency-management' version '1.1.7'
 	id 'com.diffplug.spotless' version '6.20.0'
+	id 'jacoco'
+	id "org.sonarqube" version "6.0.1.5171"
 }
 
 group = 'depromeet'
@@ -24,9 +26,6 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-tasks.named('test') {
-	useJUnitPlatform()
-}
 spotless {
 	java {
 		// Import 순서
@@ -43,6 +42,103 @@ spotless {
 		formatAnnotations()
 	}
 }
+
+jacoco {
+	toolVersion = "0.8.12"
+}
+
+//QueryDSL이 자동 생성하는 Q 클래스들을 제외하기 위한 리스트 생성
+def QDomains = []
+for (qPattern in '*.QA'..'*.QZ') {
+	QDomains.add(qPattern + '*')
+}
+
+def jacocoExcludePatterns = [
+		// 측정 안하고 싶은 패턴
+		"**/*Application*",
+		"**/*Config*",
+		"**/*Exception*",
+		"**/*Request*",
+		"**/*Response*",
+		"**/*Dto*",
+		"**/*Interceptor*",
+		"**/*Filter*",
+		"**/*Resolver*",
+		"**/*Entity*",
+		"**/test/**",
+		"**/resources/**"
+]
+
+jacocoTestCoverageVerification {
+
+	violationRules {
+		rule {
+			enabled = true
+			element = 'CLASS' // 클래스 단위로 검증
+
+			// 라인 커버리지를 최소 80% 만족
+//			limit {
+//				counter = 'LINE'
+//				value = 'COVEREDRATIO'
+//				minimum = 0.80
+//			}
+
+			// 브랜치 커버리지를 최소 80% 만족
+//			limit {
+//				counter = 'BRANCH'
+//				value = 'COVEREDRATIO'
+//				minimum = 0.80
+//			}
+
+			excludes = jacocoExcludePatterns + QDomains // 제외 대상 반영
+		}
+	}
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+	finalizedBy 'jacocoTestReport' // 테스트 완료 후 JaCoCo 리포트 생성
+}
+
+def jacocoDir = layout.buildDirectory.dir("reports/")
+
+jacocoTestReport {
+	dependsOn test	// 테스트 실행 후 리포트 생성
+	reports {
+		html.required.set(true)
+		xml.required.set(true)
+		csv.required.set(true)
+		html.destination jacocoDir.get().file("jacoco/index.html").asFile
+		xml.destination jacocoDir.get().file("jacoco/index.xml").asFile
+		csv.destination jacocoDir.get().file("jacoco/index.csv").asFile
+	}
+
+	afterEvaluate {
+		classDirectories.setFrom(
+				files(classDirectories.files.collect {
+					fileTree(dir: it, excludes: jacocoExcludePatterns + QDomains) // 제외 대상 반영
+				})
+		)
+	}
+	finalizedBy jacocoTestCoverageVerification
+}
+
+
+sonar {
+	properties {
+		property "sonar.projectKey", "depromeet-onepiece_onepiece"
+		property "sonar.organization", "depromeet-onepiece"
+		property "sonar.host.url", "https://sonarcloud.io"
+		property 'sonar.sources', 'src'
+		property 'sonar.language', 'java'
+		property 'sonar.sourceEncoding', 'UTF-8'
+		property 'sonar.test.exclusions', jacocoExcludePatterns.join(',')
+		property 'sonar.test.inclusions', '**/*Test.java'
+		property 'sonar.java.coveragePlugin', 'jacoco'
+		property 'sonar.coverage.jacoco.xmlReportPaths', jacocoDir.get().file("jacoco/index.xml").asFile
+	}
+}
+
 
 tasks.register("updateGitHooks", Copy) {
 	from(file("${rootProject.rootDir}/scripts/pre-commit"))
